@@ -1,43 +1,56 @@
 import io
+import os
+import tempfile
 import streamlit as st
-import pdfplumber
-from docx import Document
+from pdf2docx import Converter
 
-st.set_page_config(page_title="PDF → DOCX Converter", page_icon="📄")
+st.set_page_config(page_title="PDF → DOCX", page_icon="📄")
+st.title("📄 PDF → DOCX Converter (layout + immagini)")
 
-st.title("📄 PDF → DOCX Converter")
-st.write("Upload a text-based PDF and download a DOCX.")
+uploaded = st.file_uploader("Carica un PDF", type=["pdf"])
 
-uploaded = st.file_uploader("Upload PDF", type=["pdf"])
+col1, col2 = st.columns(2)
+with col1:
+    start_page = st.number_input("Pagina iniziale (0 = prima)", min_value=0, value=0, step=1)
+with col2:
+    end_page = st.number_input("Pagina finale (None = tutte)", min_value=0, value=0, step=1)
 
-def pdf_to_docx_bytes(pdf_bytes: bytes) -> bytes:
-    pdf_file = io.BytesIO(pdf_bytes)
-    doc = Document()
-
-    with pdfplumber.open(pdf_file) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
-            doc.add_heading(f"Page {i}", level=2)
-            for line in text.splitlines():
-                doc.add_paragraph(line)
-
-    out = io.BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out.read()
+use_all_pages = st.checkbox("Converti tutte le pagine", value=True)
 
 if uploaded:
-    try:
-        st.info("Converting…")
-        docx_data = pdf_to_docx_bytes(uploaded.read())
+    st.info("Conversione in corso… (può richiedere un po’ per PDF lunghi)")
 
-        st.success("Done ✅")
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = os.path.join(tmpdir, "input.pdf")
+            docx_path = os.path.join(tmpdir, "output.docx")
+
+            # salva upload su file temporaneo
+            with open(pdf_path, "wb") as f:
+                f.write(uploaded.read())
+
+            # converti
+            cv = Converter(pdf_path)
+            if use_all_pages:
+                cv.convert(docx_path)  # tutte le pagine
+            else:
+                # pdf2docx usa start/end (end esclusivo in alcune versioni): qui usiamo end_page+1 per includerla
+                cv.convert(docx_path, start=int(start_page), end=int(end_page) + 1)
+            cv.close()
+
+            # leggi docx e offri download
+            with open(docx_path, "rb") as f:
+                docx_bytes = f.read()
+
+        st.success("Fatto ✅")
         st.download_button(
-            "Download DOCX",
-            data=docx_data,
+            "Scarica DOCX",
+            data=docx_bytes,
             file_name=uploaded.name.rsplit(".", 1)[0] + ".docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+        st.caption("Nota: conversioni perfette al 100% non esistono; dipende da com’è fatto il PDF.")
     except Exception as e:
-        st.error(f"Conversion failed: {e}")
-        st.write("If the PDF is scanned (image-only), you’ll need OCR.")
+        st.error(f"Errore di conversione: {e}")
+        st.write("Se il PDF è una scansione (immagine), serve OCR: il DOCX sarà comunque limitato.")
